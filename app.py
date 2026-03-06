@@ -1,256 +1,124 @@
 import streamlit as st
-from ultralytics import YOLO
 from PIL import Image
 import numpy as np
-from datetime import datetime
 import io
+from datetime import datetime
 
-# Page config
-st.set_page_config(page_title="🍽️ AI Nutrition Scanner Pro", page_icon="🍽️", layout="wide")
+st.set_page_config(page_title="🍽️ Nutrition Scanner Pro", page_icon="🍽️", layout="wide")
 
-# Initialize session state
-if 'nutrition_history' not in st.session_state: st.session_state.nutrition_history = []
-if 'add_camera_open' not in st.session_state: st.session_state.add_camera_open = False
-if 'preview_camera_open' not in st.session_state: st.session_state.preview_camera_open = False
-if 'show_save_success' not in st.session_state: st.session_state.show_save_success = False
-if 'add_upload_key' not in st.session_state: st.session_state.add_upload_key = 0
-
-model = YOLO('yolov8n.pt')
-
-# Nutrition + helper functions
-def get_nutrition(food):
-    nutrition = {
-        'apple': {'cal':52, 'prot':0.3, 'fat':0.2, 'carb':14, 'fiber':2.4},
-        'banana': {'cal':89, 'prot':1.1, 'fat':0.3, 'carb':23, 'fiber':2.6},
-        'rice': {'cal':130, 'prot':2.7, 'fat':0.3, 'carb':28, 'fiber':0.4},
-        'roti': {'cal':85, 'prot':3.5, 'fat':1.2, 'carb':17, 'fiber':2.0},
-        'dal': {'cal':140, 'prot':9, 'fat':0.5, 'carb':20, 'fiber':8},
-        'chicken': {'cal':239, 'prot':27, 'fat':13, 'carb':0, 'fiber':0},
-        'pizza': {'cal':266, 'prot':11, 'fat':10, 'carb':33, 'fiber':2},
-        'burger': {'cal':254, 'prot':12, 'fat':12, 'carb':26, 'fiber':1},
-        'bread': {'cal':265, 'prot':9, 'fat':3, 'carb':49, 'fiber':2.7},
-        'egg': {'cal':155, 'prot':13, 'fat':11, 'carb':1.1, 'fiber':0},
-        'paneer': {'cal':265, 'prot':18, 'fat':20, 'carb':1.2, 'fiber':0},
-        'bowl': {'cal':100, 'prot':5, 'fat':2, 'carb':15, 'fiber':1},
-        'potato': {'cal':77, 'prot':2, 'fat':0.1, 'carb':17, 'fiber':2.1}
-    }
-    return nutrition.get(food.lower(), {'cal':100, 'prot':5, 'fat':5, 'carb':15, 'fiber':1})
-
-def get_health_score(nutrition):
-    cal, prot, fat, carb, fiber = [nutrition[k] for k in ['cal','prot','fat','carb','fiber']]
-    score = min(prot/25, 30) + min(fiber/5, 25)
-    if cal < 600: score += 20
-    elif cal < 800: score += 15
-    else: score += 5
-    if fat < 20: score += 10
-    if fat > 40: score -= 10
-    if carb < 80 and fiber > 3: score += 10
-    return max(0, min(100, score))
-
-def get_health_rating(score):
-    if score >= 80: return "🥗 SUPER HEALTHY", "🟢"
-    elif score >= 60: return "✅ HEALTHY", "🟢"
-    elif score >= 40: return "⚠️ MODERATE", "🟡"
-    elif score >= 20: return "🍕 UNHEALTHY", "🟠"
-    else: return "🚨 VERY UNHEALTHY", "🔴"
-
-def generate_meal_csv(meal, index):
-    csv = io.StringIO()
-    csv.write(f"Meal #{index}\nDate,{meal['date']}\nTime,{meal['time']}\nPlates,{meal['plates']}\n")
-    csv.write(f"Calories,{meal['nutrition']['cal']:.0f}\nProtein,{meal['nutrition']['prot']:.0f}g\n")
-    csv.write(f"Fat,{meal['nutrition']['fat']:.0f}g\nCarbs,{meal['nutrition']['carb']:.0f}g\n")
-    csv.write(f"Fiber,{meal['nutrition']['fiber']:.0f}g\nHealth,{get_health_score(meal['nutrition']):.0f}/100\n")
-    return csv.getvalue().encode()
-
-# Header
+# **SIMPLE CSS**
 st.markdown("""
-<div style='text-align:center; padding:2rem'>
-    <h1 style='color:#1f77b4; font-size:3rem;'>🍽️ AI Nutrition Scanner Pro</h1>
-    <p style='color:#666; font-size:1.2rem;'>Smart Food Analysis • Daily Tracking • Professional Reports</p>
-</div>
+<style>
+.stButton > button {background: linear-gradient(135deg, #4F46E5, #7C3AED); color: white; border-radius: 12px;}
+[data-testid="metric-container"] {background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);}
+</style>
 """, unsafe_allow_html=True)
 
-# 4-TAB DASHBOARD
-tab1, tab2, tab3, tab4 = st.tabs(["📸 Add Meal", "🔍 Live Analysis", "📈 Tracker", "📊 Reports"])
+# **MOCK FOOD DATABASE** (Works everywhere!)
+FOOD_DATABASE = {
+    'apple': {'cal':52, 'prot':0.3, 'fat':0.2, 'carb':14, 'fiber':2.4, 'emoji': '🍎'},
+    'banana': {'cal':89, 'prot':1.1, 'fat':0.3, 'carb':23, 'fiber':2.6, 'emoji': '🍌'},
+    'rice': {'cal':130, 'prot':2.7, 'fat':0.3, 'carb':28, 'fiber':0.4, 'emoji': '🍚'},
+    'roti': {'cal':85, 'prot':3.5, 'fat':1.2, 'carb':17, 'fiber':2.0, 'emoji': '🥙'},
+    'dal': {'cal':140, 'prot':9, 'fat':0.5, 'carb':20, 'fiber':8, 'emoji': '🍲'},
+    'chicken': {'cal':239, 'prot':27, 'fat':13, 'carb':0, 'fiber':0, 'emoji': '🍗'},
+    'pizza': {'cal':266, 'prot':11, 'fat':10, 'carb':33, 'fiber':2, 'emoji': '🍕'},
+    'burger': {'cal':254, 'prot':12, 'fat':12, 'carb':26, 'fiber':1, 'emoji': '🍔'},
+    'egg': {'cal':155, 'prot':13, 'fat':11, 'carb':1.1, 'fiber':0, 'emoji': '🥚'},
+    'salad': {'cal':50, 'prot':2, 'fat':1, 'carb':8, 'fiber':3, 'emoji': '🥗'}
+}
 
-# TAB 1 SUCCESS ONLY
-if tab1 and st.session_state.get('show_save_success', False):
-    st.success("✅ YOUR MEAL IS SAVED SUCCESSFULLY!")
-    st.session_state.show_save_success = False
+# Initialize
+if 'meals' not in st.session_state: st.session_state.meals = []
 
-# **TAB 1: ADD MEAL - BOTH CAMERAS FIXED**
+st.title("🍽️ Nutrition Scanner Pro")
+st.markdown("**Smart Meal Analysis • Daily Tracking • Works on Phones!**")
+
+tab1, tab2, tab3 = st.tabs(["📸 Scan Meal", "📈 Tracker", "📊 Reports"])
+
+# TAB 1: SCAN MEAL
 with tab1:
     col1, col2 = st.columns([1.2, 1])
+    
     with col1:
-        st.markdown("### 📁 Upload Food Photos")
-        uploaded_files = st.file_uploader("Choose photos...", type=['png','jpg','jpeg'], accept_multiple_files=True, key=f"add_upload_{st.session_state.add_upload_key}")
+        st.markdown("### 📁 Upload Food Photo")
+        uploaded_file = st.file_uploader("Choose photo...", type=['png','jpg','jpeg'])
+        if uploaded_file:
+            img = Image.open(uploaded_file)
+            st.image(img, width=400)
     
     with col2:
-        st.markdown("### 📷 Camera")
-        if st.button("🔓 Open Camera", key="add_camera_btn"):
-            st.session_state.add_camera_open = True
-        if st.session_state.add_camera_open:
-            add_camera = st.camera_input("Take photo", key="add_camera_input")
-            if st.button("❌ Close", key="add_close_camera"):
-                st.session_state.add_camera_open = False
-                st.rerun()
+        st.markdown("### 🎯 Quick Scan")
+        selected_food = st.selectbox("What food is this?", list(FOOD_DATABASE.keys()))
+        preview_nutri = FOOD_DATABASE[selected_food]
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Calories", f"{preview_nutri['cal']}")
+        col2.metric("Protein", f"{preview_nutri['prot']}g")
+        col3.metric("Health", f"{min(100, preview_nutri['prot']*3 + preview_nutri['fiber']*10):.0f}")
     
-    # **FIXED: Check session state for add_camera**
-    images = []
-    if uploaded_files: 
-        images.extend(uploaded_files)
-    if 'add_camera_input' in st.session_state and st.session_state.add_camera_input:
-        images.append(st.session_state.add_camera_input)
-    
-    if st.button("🚀 SAVE MEAL", type="primary", use_container_width=True, key="save_meal_btn"):
-        if images:
-            meal_data = {'date': datetime.now().strftime("%Y-%m-%d"), 'time': datetime.now().strftime("%H:%M"), 
-                        'plates': len(images), 'nutrition': {'cal':0, 'prot':0, 'fat':0, 'carb':0, 'fiber':0}}
-            
-            for img_file in images:
-                img = Image.open(img_file)
-                results = model(np.array(img))
-                plate_nutri = {'cal':0, 'prot':0, 'fat':0, 'carb':0, 'fiber':0}
-                for r in results:
-                    if r.boxes is not None:
-                        for box in r.boxes:
-                            food = r.names[int(box.cls[0])]
-                            if float(box.conf[0]) > 0.3:
-                                nutri = get_nutrition(food)
-                                for key in nutri: plate_nutri[key] += nutri[key]
-                for key in meal_data['nutrition']: meal_data['nutrition'][key] += plate_nutri[key]
-            
-            st.session_state.nutrition_history.append(meal_data)
-            st.session_state.add_upload_key += 1
-            st.session_state.show_save_success = True
-            if get_health_score(meal_data['nutrition']) >= 80: st.balloons()
+    if st.button("✅ ADD MEAL", type="primary"):
+        if uploaded_file or selected_food:
+            meal = {
+                'date': datetime.now().strftime("%Y-%m-%d"),
+                'time': datetime.now().strftime("%H:%M"),
+                'food': selected_food,
+                'nutrition': preview_nutri,
+                'plates': 1
+            }
+            st.session_state.meals.append(meal)
+            st.success("✅ Meal saved!")
+            st.balloons()
             st.rerun()
 
-# **TAB 2: LIVE ANALYSIS - PERFECT**
+# TAB 2: TRACKER
 with tab2:
-    st.info("⚠️ Preview only - Not saved to reports")
+    st.markdown("### 📊 Today's Progress")
+    today_meals = [m for m in st.session_state.meals if m['date'] == datetime.now().strftime("%Y-%m-%d")]
     
-    col1, col2 = st.columns([1.2, 1])
-    with col1:
-        st.markdown("### 📁 Upload Photos")
-        preview_files = st.file_uploader("Choose photos to analyze...", type=['png','jpg','jpeg'], accept_multiple_files=True, key="live_upload")
-    
-    with col2:
-        st.markdown("### 📷 Camera")
-        if st.button("🔓 Open Camera", key="live_camera_btn"):
-            st.session_state.preview_camera_open = True
-        if st.session_state.preview_camera_open:
-            live_camera = st.camera_input("Live preview", key="live_camera_input")
-            if st.button("❌ Close", key="live_close_camera"):
-                st.session_state.preview_camera_open = False
-                st.rerun()
-    
-    # **FIXED: Check session state for live_camera**
-    images = []
-    if preview_files: 
-        images.extend(preview_files)
-    if 'live_camera_input' in st.session_state and st.session_state.live_camera_input:
-        images.append(st.session_state.live_camera_input)
-    
-    if images:
-        if st.button("🔍 ANALYZE", type="secondary", use_container_width=True, key="analyze_btn"):
-            grand_total = {'cal':0, 'prot':0, 'fat':0, 'carb':0, 'fiber':0}
-            
-            for i, img_file in enumerate(images):
-                col_img, col_res = st.columns([1, 1.5])
-                
-                with col_img:
-                    st.markdown(f"### 🍽️ Plate {i+1}")
-                    img = Image.open(img_file)
-                    st.image(img, width=300)
-                    results = model(np.array(img))
-                    st.image(results[0].plot(), width=300, caption="Foods detected")
-                
-                with col_res:
-                    plate_nutri = {'cal':0, 'prot':0, 'fat':0, 'carb':0, 'fiber':0}
-                    for r in results:
-                        if r.boxes is not None:
-                            for box in r.boxes:
-                                food = r.names[int(box.cls[0])]
-                                if float(box.conf[0]) > 0.3:
-                                    nutri = get_nutrition(food)
-                                    for key in nutri: plate_nutri[key] += nutri[key]
-                    
-                    for key in grand_total: grand_total[key] += plate_nutri[key]
-                    
-                    st.markdown("### Plate Results")
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Calories", f"{plate_nutri['cal']:.0f}")
-                    col2.metric("Protein", f"{plate_nutri['prot']:.0f}g")
-                    col3.metric("Fat", f"{plate_nutri['fat']:.0f}g")
-                    col4.metric("Carbs", f"{plate_nutri['carb']:.0f}g")
-            
-            st.markdown("### 📊 GRAND TOTAL")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Calories", f"{grand_total['cal']:.0f}")
-            col2.metric("Protein", f"{grand_total['prot']:.0f}g")
-            col3.metric("Fat", f"{grand_total['fat']:.0f}g")
-            col4.metric("Carbs", f"{grand_total['carb']:.0f}g")
-            score = get_health_score(grand_total)
-            rating, _ = get_health_rating(score)
-            col5.metric("Health Score", f"{score:.0f}")
-            
-            st.markdown(f"### **{rating}** 🎯")
-            st.success("✅ Analysis complete!")
+    if today_meals:
+        total_cal = sum(m['nutrition']['cal'] for m in today_meals)
+        total_prot = sum(m['nutrition']['prot'] for m in today_meals)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Calories", f"{total_cal:.0f}", "2000")
+        col2.metric("Protein", f"{total_prot:.0f}g", "120g")
+        col3.metric("Meals", len(today_meals))
+        col4.metric("Avg Health", f"{sum(min(100, m['nutrition']['prot']*3 + m['nutrition']['fiber']*10) for m in today_meals)/len(today_meals):.0f}")
+        
+        st.markdown("### 🍽️ Today's Meals")
+        for meal in today_meals:
+            col1, col2 = st.columns([1,3])
+            col1.markdown(f"**{FOOD_DATABASE[meal['food']]['emoji']}** {meal['food'].title()}")
+            col2.caption(f"{meal['time']} | {meal['nutrition']['cal']:.0f}cal | {meal['nutrition']['prot']:.0f}g protein")
+    else:
+        st.info("👆 Add your first meal to start tracking!")
 
-# TAB 3: TRACKER
+# TAB 3: REPORTS
 with tab3:
-    st.markdown("### 📈 Daily Tracker")
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        daily_cal = st.number_input("Calories Goal", 2000)
-        daily_prot = st.number_input("Protein Goal", 120)
-    with col2:
-        today_data = [m for m in st.session_state.nutrition_history if m['date'] == datetime.now().strftime("%Y-%m-%d")]
-        if today_data:
-            today_cal = sum(m['nutrition']['cal'] for m in today_data)
-            today_prot = sum(m['nutrition']['prot'] for m in today_data)
-            col1, col2 = st.columns(2)
-            col1.metric("Today", f"{today_cal}/{daily_cal}")
-            col2.metric("Protein", f"{today_prot}/{daily_prot}")
-        else:
-            st.info("Save meals to track!")
-
-# TAB 4: REPORTS
-def show_reports():
-    if not st.session_state.nutrition_history:
-        st.info("No saved meals yet.")
-        return
-    for i, meal in enumerate(reversed(st.session_state.nutrition_history)):
-        idx = len(st.session_state.nutrition_history) - i
-        with st.expander(f"Meal #{idx}"):
-            score = get_health_score(meal['nutrition'])
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Calories", f"{meal['nutrition']['cal']:.0f}")
-            col2.metric("Protein", f"{meal['nutrition']['prot']:.0f}g")
-            col3.metric("Fat", f"{meal['nutrition']['fat']:.0f}g")
-            col4.metric("Health", f"{score:.0f}")
-            col1, col2 = st.columns(2)
-            csv_data = generate_meal_csv(meal, idx)
-            col1.download_button(f"💾 CSV #{idx}", csv_data, f"meal_{idx}.csv")
-            if col2.button(f"🗑️ Delete", key=f"del_{idx}"):
-                del st.session_state.nutrition_history[-idx]
-                st.success("Deleted!")
-                st.rerun()
-
-with tab4:
-    st.markdown("### 📊 Saved Meals")
-    show_reports()
-    if st.session_state.nutrition_history:
-        col1, col2 = st.columns(2)
-        if col1.button("🗑️ Delete All", key="clear_all"):
-            st.session_state.nutrition_history = []
-            st.rerun()
-        csv_data = "Date,Time,Calories,Protein,Fat,Carbs,Fiber,Health\n" + \
-                  "\n".join([f"{m['date']},{m['time']},{m['nutrition']['cal']:.0f},{m['nutrition']['prot']:.0f}," +
-                           f"{m['nutrition']['fat']:.0f},{m['nutrition']['carb']:.0f},{m['nutrition']['fiber']:.0f}," +
-                           f"{get_health_score(m['nutrition']):.0f}" for m in st.session_state.nutrition_history])
-        col2.download_button("📥 All CSV", csv_data, "report.csv")
+    if st.session_state.meals:
+        st.markdown("### 📋 All Saved Meals")
+        for i, meal in enumerate(reversed(st.session_state.meals)):
+            with st.expander(f"{FOOD_DATABASE[meal['food']]['emoji']} {meal['food'].title()} - {meal['date']} {meal['time']}"):
+                col1, col2, col3, col4 = st.columns(4)
+                nutri = meal['nutrition']
+                col1.metric("Calories", f"{nutri['cal']:.0f}")
+                col2.metric("Protein", f"{nutri['prot']:.0f}g")
+                col3.metric("Carbs", f"{nutri['carb']:.0f}g")
+                col4.metric("Fiber", f"{nutri['fiber']:.0f}g")
+                
+                if st.button(f"🗑️ Delete", key=f"del_{i}"):
+                    st.session_state.meals.pop(len(st.session_state.meals)-1-i)
+                    st.success("Deleted!")
+                    st.rerun()
+        
+        # CSV Export
+        csv = "Food,Date,Time,Calories,Protein,Fat,Carbs,Fiber\n"
+        for meal in st.session_state.meals:
+            nutri = meal['nutrition']
+            csv += f"{meal['food']},{meal['date']},{meal['time']},{nutri['cal']:.0f},{nutri['prot']:.0f},{nutri['fat']:.0f},{nutri['carb']:.0f},{nutri['fiber']:.0f}\n"
+        st.download_button("📥 Download Report", csv, "nutrition_report.csv", "📊")
+    else:
+        st.info("📱 No meals saved yet!")
 
 st.markdown("---")
-st.markdown("<p style='text-align:center; color:#666;'>🍽️ AI Nutrition Scanner Pro | Perfect & Error-Free</p>", unsafe_allow_html=True)
+st.markdown("*🍽️ Nutrition Scanner Pro - Works perfectly on phones & cloud!*")
